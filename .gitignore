@@ -1,0 +1,39 @@
+# VPCctl gitignore
+
+# Runtime state files
+state/*.json
+
+# Log files
+logs/*.log
+
+# Temporary files
+*.tmp
+*.pid
+/tmp/app-*.sh
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+
+# Test artifacts
+test-results/
+coverage/
