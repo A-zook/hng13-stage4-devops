@@ -249,7 +249,11 @@ class VPCManager:
             
             # Configure NAT for public subnets
             if subnet_type == "public":
-                self._run_cmd(f"iptables -t nat -A POSTROUTING -s {cidr} -o {vpc_data['internet_iface']} -j MASQUERADE")
+                # Check if NAT rule already exists
+                check_cmd = f"iptables -t nat -C POSTROUTING -s {cidr} -o {vpc_data['internet_iface']} -j MASQUERADE"
+                result = self._run_cmd(check_cmd, check=False)
+                if result.returncode != 0:
+                    self._run_cmd(f"iptables -t nat -A POSTROUTING -s {cidr} -o {vpc_data['internet_iface']} -j MASQUERADE")
             
             # Update VPC state
             vpc_data["subnets"][subnet_name] = {
@@ -395,7 +399,10 @@ wait
         veth_b = f"p{vpc_a_short}{vpc_b_short}b"  # e.g., pvpcAvpcBb
         
         try:
-            self._run_cmd(f"ip link add {veth_a} type veth peer name {veth_b}")
+            # Check if veth pair already exists
+            result = self._run_cmd(f"ip link show {veth_a}", check=False)
+            if result.returncode != 0:
+                self._run_cmd(f"ip link add {veth_a} type veth peer name {veth_b}")
             
             # Attach to bridges
             self._run_cmd(f"ip link set {veth_a} master {bridge_a}")
@@ -403,14 +410,14 @@ wait
             self._run_cmd(f"ip link set {veth_a} up")
             self._run_cmd(f"ip link set {veth_b} up")
             
-            # Add routes for allowed CIDRs
-            cidrs = [c.strip() for c in allowed_cidrs.split(",")]
+            # Add cross-VPC routes (ignore if exists)
+            vpc_a_cidr = vpc_a_data["cidr"]
+            vpc_b_cidr = vpc_b_data["cidr"]
             
-            for cidr in cidrs:
-                # Route from A to B
-                self._run_cmd(f"ip route add {cidr} dev {bridge_a}")
-                # Route from B to A  
-                self._run_cmd(f"ip route add {cidr} dev {bridge_b}")
+            # Route from A to B's network
+            self._run_cmd(f"ip route add {vpc_b_cidr} dev {bridge_a}", check=False)
+            # Route from B to A's network
+            self._run_cmd(f"ip route add {vpc_a_cidr} dev {bridge_b}", check=False)
             
             logger.info(f"Peering established between {vpc_a} and {vpc_b}")
             
