@@ -18,6 +18,7 @@ chmod +x *.sh scripts/*.sh tests/*.sh
 ```bash
 sudo apt update
 sudo apt install iproute2 iptables bridge-utils python3 curl
+sudo apt install build-essential
 ```
 
 ### 3. Run Quick Demo

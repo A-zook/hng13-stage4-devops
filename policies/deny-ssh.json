@@ -1,6 +1,6 @@
 [
   {
-    "subnet": "10.20.2.0/24",
+    "subnet": "10.50.2.0/24",
     "ingress": [
       {"port": 80, "protocol": "tcp", "action": "deny"},
       {"port": 22, "protocol": "tcp", "action": "deny"}

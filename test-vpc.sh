@@ -52,7 +52,7 @@ BR=$(ip link show | grep vpc-test-br | awk -F: '{print $2}' | xargs)
 echo "✅ Using bridge: $BR"
 
 # Enable bridge packet forwarding explicitly
-echo 1 | sudo tee /proc/sys/net/ipv4/conf/$BR/forwarding
+sudo sh -c "echo 1 > /proc/sys/net/ipv4/conf/vpc-test-br/forwarding"
 
 # Verify namespaces
 sudo ip netns list

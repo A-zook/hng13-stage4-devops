@@ -1,3 +1,12 @@
+#!/bin/bash
+# Run this on the Ubuntu server to create VPCctl
+
+# Create project directory
+mkdir -p vpcctl
+cd vpcctl
+
+# Create main CLI tool
+cat > vpcctl.py << 'EOF'
 #!/usr/bin/env python3
 """
 vpcctl - Virtual Private Cloud management tool for Linux
@@ -157,9 +166,6 @@ class VPCManager:
                 network = ipaddress.ip_network(cidr)
                 bridge_ip = f"{network.network_address + 1}/{network.prefixlen}"
                 self._run_cmd(f"ip addr add {bridge_ip} dev {bridge_name}")
-                
-                # Enable forwarding on bridge
-                self._run_cmd(f"echo 1 > /proc/sys/net/ipv4/conf/{bridge_name}/forwarding", check=False)
             
             # Enable IP forwarding
             self._enable_ip_forward()
@@ -216,13 +222,9 @@ class VPCManager:
             else:
                 raise VPCError(f"Subnet {subnet_name} exists with different configuration")
         
-        # Use shorter names to avoid 15-char limit
-        vpc_short = vpc_name[:4]  # First 4 chars of VPC name
-        subnet_short = subnet_name[:4]  # First 4 chars of subnet name
-        
         ns_name = f"vpc-{vpc_name}-ns-{subnet_name}"
-        veth_host = f"v{vpc_short}{subnet_short}h"  # e.g., vvpcApubh
-        veth_ns = f"v{vpc_short}{subnet_short}n"    # e.g., vvpcApubn
+        veth_host = f"veth-{vpc_name}-{subnet_name}"
+        veth_ns = f"veth-ns-{subnet_name}"
         
         try:
             # Create namespace
@@ -252,11 +254,7 @@ class VPCManager:
             
             # Configure NAT for public subnets
             if subnet_type == "public":
-                # Check if NAT rule already exists
-                check_cmd = f"iptables -t nat -C POSTROUTING -s {cidr} -o {vpc_data['internet_iface']} -j MASQUERADE"
-                result = self._run_cmd(check_cmd, check=False)
-                if result.returncode != 0:
-                    self._run_cmd(f"iptables -t nat -A POSTROUTING -s {cidr} -o {vpc_data['internet_iface']} -j MASQUERADE")
+                self._run_cmd(f"iptables -t nat -A POSTROUTING -s {cidr} -o {vpc_data['internet_iface']} -j MASQUERADE")
             
             # Update VPC state
             vpc_data["subnets"][subnet_name] = {
@@ -395,17 +393,12 @@ wait
         bridge_a = vpc_a_data["bridge"]
         bridge_b = vpc_b_data["bridge"]
         
-        # Create peering veth pair with short names
-        vpc_a_short = vpc_a[:4]
-        vpc_b_short = vpc_b[:4]
-        veth_a = f"p{vpc_a_short}{vpc_b_short}a"  # e.g., pvpcAvpcBa
-        veth_b = f"p{vpc_a_short}{vpc_b_short}b"  # e.g., pvpcAvpcBb
+        # Create peering veth pair
+        veth_a = f"peer-{vpc_a}-{vpc_b}"
+        veth_b = f"peer-{vpc_b}-{vpc_a}"
         
         try:
-            # Check if veth pair already exists
-            result = self._run_cmd(f"ip link show {veth_a}", check=False)
-            if result.returncode != 0:
-                self._run_cmd(f"ip link add {veth_a} type veth peer name {veth_b}")
+            self._run_cmd(f"ip link add {veth_a} type veth peer name {veth_b}")
             
             # Attach to bridges
             self._run_cmd(f"ip link set {veth_a} master {bridge_a}")
@@ -413,14 +406,14 @@ wait
             self._run_cmd(f"ip link set {veth_a} up")
             self._run_cmd(f"ip link set {veth_b} up")
             
-            # Add cross-VPC routes (ignore if exists)
-            vpc_a_cidr = vpc_a_data["cidr"]
-            vpc_b_cidr = vpc_b_data["cidr"]
+            # Add routes for allowed CIDRs
+            cidrs = [c.strip() for c in allowed_cidrs.split(",")]
             
-            # Route from A to B's network
-            self._run_cmd(f"ip route add {vpc_b_cidr} dev {bridge_a}", check=False)
-            # Route from B to A's network
-            self._run_cmd(f"ip route add {vpc_a_cidr} dev {bridge_b}", check=False)
+            for cidr in cidrs:
+                # Route from A to B
+                self._run_cmd(f"ip route add {cidr} dev {bridge_a}")
+                # Route from B to A  
+                self._run_cmd(f"ip route add {cidr} dev {bridge_b}")
             
             logger.info(f"Peering established between {vpc_a} and {vpc_b}")
             
@@ -540,15 +533,6 @@ wait
                     if len(parts) > 1:
                         bridge_name = parts[1].rstrip(':')
                         self._run_cmd(f"ip link delete {bridge_name}", check=False)
-            
-            # Clean up any remaining veth pairs
-            result = self._run_cmd("ip link show", check=False)
-            for line in result.stdout.split('\n'):
-                if 'vvpc' in line or 'pvpc' in line or 'vtest' in line or 'vprod' in line:
-                    parts = line.split()
-                    if len(parts) > 1:
-                        iface_name = parts[1].split('@')[0].rstrip(':')
-                        self._run_cmd(f"ip link delete {iface_name}", check=False)
         except:
             pass
         
@@ -652,3 +636,167 @@ def main():
 
 if __name__ == "__main__":
     main()
+EOF
+
+# Create directories
+mkdir -p state logs policies scripts tests docs
+
+# Create sample policy
+cat > policies/deny-ssh.json << 'EOF'
+[
+  {
+    "subnet": "10.20.2.0/24",
+    "ingress": [
+      {"port": 80, "protocol": "tcp", "action": "deny"},
+      {"port": 22, "protocol": "tcp", "action": "deny"}
+    ],
+    "egress": [
+      {"port": "any", "protocol": "any", "action": "allow"}
+    ]
+  }
+]
+EOF
+
+# Create demo script
+cat > scripts/demo.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "=== VPCctl Demo ==="
+
+# Check root
+if [[ $EUID -ne 0 ]]; then
+   echo "Must run as root"
+   exit 1
+fi
+
+# Detect interface
+IFACE=$(ip route | grep default | head -1 | awk '{print $5}')
+if [[ -z "$IFACE" ]]; then
+    IFACE="eth0"
+fi
+
+echo "Using interface: $IFACE"
+
+# Clean up
+./vpcctl.py teardown-all 2>/dev/null || true
+
+# Create VPC
+./vpcctl.py create-vpc --name testvpc --cidr 10.20.0.0/16 --internet-iface $IFACE
+./vpcctl.py add-subnet --vpc testvpc --name public --cidr 10.20.1.0/24 --type public
+./vpcctl.py add-subnet --vpc testvpc --name private --cidr 10.20.2.0/24 --type private
+
+# List VPCs
+./vpcctl.py list-vpcs
+
+# Test connectivity
+echo "Testing connectivity..."
+timeout 5 ip netns exec vpc-testvpc-ns-public ping -c 2 8.8.8.8 || echo "NAT test done"
+
+# Cleanup
+./vpcctl.py teardown-all
+
+echo "Demo completed!"
+EOF
+
+# Create test script
+cat > tests/integration_test.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "=== VPCctl Tests ==="
+
+if [[ $EUID -ne 0 ]]; then
+   echo "Must run as root"
+   exit 1
+fi
+
+IFACE=$(ip route | grep default | head -1 | awk '{print $5}')
+if [[ -z "$IFACE" ]]; then
+    IFACE="eth0"
+fi
+
+# Clean up
+./vpcctl.py teardown-all 2>/dev/null || true
+
+# Test VPC creation
+./vpcctl.py create-vpc --name test --cidr 10.20.0.0/16 --internet-iface $IFACE
+./vpcctl.py add-subnet --vpc test --name public --cidr 10.20.1.0/24 --type public
+
+# Check resources
+if ip link show vpc-test-br >/dev/null 2>&1; then
+    echo "✓ Bridge created"
+else
+    echo "✗ Bridge not found"
+fi
+
+if ip netns list | grep vpc-test-ns-public >/dev/null; then
+    echo "✓ Namespace created"
+else
+    echo "✗ Namespace not found"
+fi
+
+# Test cleanup
+./vpcctl.py delete-vpc --name test
+
+if ! ip link show vpc-test-br >/dev/null 2>&1; then
+    echo "✓ Bridge cleaned up"
+else
+    echo "✗ Bridge still exists"
+fi
+
+echo "Tests completed!"
+EOF
+
+# Make executable
+chmod +x vpcctl.py scripts/demo.sh tests/integration_test.sh
+
+# Create README
+cat > README.md << 'EOF'
+# VPCctl - Virtual Private Cloud Management Tool
+
+## Quick Start
+
+```bash
+# Install dependencies
+sudo apt update
+sudo apt install -y iproute2 iptables bridge-utils python3 curl
+
+# Create VPC
+sudo ./vpcctl.py create-vpc --name test --cidr 10.20.0.0/16 --internet-iface eth0
+
+# Add subnets
+sudo ./vpcctl.py add-subnet --vpc test --name public --cidr 10.20.1.0/24 --type public
+sudo ./vpcctl.py add-subnet --vpc test --name private --cidr 10.20.2.0/24 --type private
+
+# List VPCs
+sudo ./vpcctl.py list-vpcs
+
+# Run demo
+sudo ./scripts/demo.sh
+
+# Run tests
+sudo ./tests/integration_test.sh
+
+# Cleanup
+sudo ./vpcctl.py teardown-all
+```
+
+## Commands
+
+- `create-vpc` - Create new VPC
+- `add-subnet` - Add subnet to VPC
+- `deploy-app` - Deploy application
+- `apply-policy` - Apply firewall rules
+- `peer` - Connect VPCs
+- `inspect` - Show VPC details
+- `list-vpcs` - List all VPCs
+- `delete-vpc` - Remove VPC
+- `teardown-all` - Clean everything
+EOF
+
+echo "VPCctl setup complete!"
+echo "Run: sudo ./vpcctl.py --help"
+EOF
+
+chmod +x server-setup.sh
