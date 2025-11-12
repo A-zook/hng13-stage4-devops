@@ -35,11 +35,31 @@ Host Network
 - Root privileges
 - iproute2, iptables, bridge-utils
 
+## Quick Start
+
+```bash
+# Clone and test
+git clone https://github.com/A-zook/hng13-stage4-devops.git
+cd hng13-stage4-devops
+
+# Run validation (recommended first step)
+chmod +x validate.sh
+sudo ./validate.sh
+
+# Run integration tests
+chmod +x tests/integration_test.sh
+sudo ./tests/integration_test.sh
+
+# Run comprehensive test suite
+chmod +x test-vpc.sh
+sudo ./test-vpc.sh
+```
+
 ## Installation
 
 ```bash
-git clone <repository>
-cd vpcctl
+git clone https://github.com/A-zook/hng13-stage4-devops.git
+cd hng13-stage4-devops
 sudo python3 vpcctl.py --help
 ```
 
@@ -144,17 +164,32 @@ Create JSON policy files in `policies/` directory:
 
 ## Testing
 
-Run the integration test suite:
+### Validation Test Suite
+Run the validation tests to verify all functionality:
 
 ```bash
 sudo ./tests/integration_test.sh
 ```
 
-Or run the demo script:
+### Comprehensive Test Suite
+Run the full end-to-end test demonstrating all features:
 
 ```bash
-sudo ./scripts/demo.sh
+sudo ./test-vpc.sh
 ```
+
+### Validation Results
+All test scenarios pass successfully:
+
+| Scenario | Expected Behavior | Status |
+|----------|------------------|--------|
+| Communication between subnets in same VPC | Works successfully | ✅ PASS |
+| Outbound access from public subnet | Works successfully | ✅ PASS |
+| Outbound access from private subnet | Blocked or restricted | ✅ PASS |
+| Communication between different VPCs | Blocked by default | ✅ PASS |
+| Communication after peering | Allowed where configured | ✅ PASS |
+| Policy enforcement | Specific connections blocked | ✅ PASS |
+| Logging | All VPC activities logged | ✅ PASS |
 
 ## Cleanup
 
