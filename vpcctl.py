@@ -243,6 +243,10 @@ class VPCManager:
             gateway_ip = str(subnet_network.network_address + 1)
             host_ip = f"{subnet_network.network_address + 2}/{subnet_network.prefixlen}"
             
+            # Add gateway IP to bridge for this subnet
+            bridge_gateway_ip = f"{gateway_ip}/{subnet_network.prefixlen}"
+            self._run_cmd(f"ip addr add {bridge_gateway_ip} dev {vpc_data['bridge']}", check=False)
+            
             self._run_cmd(f"ip netns exec {ns_name} ip link set {veth_ns} up")
             self._run_cmd(f"ip netns exec {ns_name} ip addr add {host_ip} dev {veth_ns}")
             self._run_cmd(f"ip netns exec {ns_name} ip link set lo up")
@@ -495,6 +499,11 @@ wait
         for subnet_name, subnet in vpc_data["subnets"].items():
             ns_name = subnet["namespace"]
             veth_host = subnet["veth_host"]
+            
+            # Remove gateway IP from bridge
+            subnet_net = ipaddress.ip_network(subnet["cidr"])
+            gateway_ip = f"{subnet_net.network_address + 1}/{subnet_net.prefixlen}"
+            self._run_cmd(f"ip addr del {gateway_ip} dev {vpc_data['bridge']}", check=False)
             
             # Remove NAT rules for public subnets
             if subnet["type"] == "public":
