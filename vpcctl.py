@@ -213,9 +213,13 @@ class VPCManager:
             else:
                 raise VPCError(f"Subnet {subnet_name} exists with different configuration")
         
+        # Use shorter names to avoid 15-char limit
+        vpc_short = vpc_name[:4]  # First 4 chars of VPC name
+        subnet_short = subnet_name[:4]  # First 4 chars of subnet name
+        
         ns_name = f"vpc-{vpc_name}-ns-{subnet_name}"
-        veth_host = f"veth-{vpc_name}-{subnet_name}"
-        veth_ns = f"veth-ns-{subnet_name}"
+        veth_host = f"v{vpc_short}{subnet_short}h"  # e.g., vvpcApubh
+        veth_ns = f"v{vpc_short}{subnet_short}n"    # e.g., vvpcApubn
         
         try:
             # Create namespace
@@ -384,9 +388,11 @@ wait
         bridge_a = vpc_a_data["bridge"]
         bridge_b = vpc_b_data["bridge"]
         
-        # Create peering veth pair
-        veth_a = f"peer-{vpc_a}-{vpc_b}"
-        veth_b = f"peer-{vpc_b}-{vpc_a}"
+        # Create peering veth pair with short names
+        vpc_a_short = vpc_a[:4]
+        vpc_b_short = vpc_b[:4]
+        veth_a = f"p{vpc_a_short}{vpc_b_short}a"  # e.g., pvpcAvpcBa
+        veth_b = f"p{vpc_a_short}{vpc_b_short}b"  # e.g., pvpcAvpcBb
         
         try:
             self._run_cmd(f"ip link add {veth_a} type veth peer name {veth_b}")
